@@ -1,0 +1,10 @@
+{
+    "millisecondsPerTick": 5000,
+    "earnByPlaying": true,
+    "coinsPerSecond": 2777778000000000,
+    "playersWalletsPath": "path/to/file/players_wallets.json",
+    "walletsPath": "path/to/file/wallets.json",
+    "lockFile": "path/to/file/wallets.lock",
+    "resyncFile": "path/to/file/wallets.resync",
+    "enableExtendedLog": false
+}

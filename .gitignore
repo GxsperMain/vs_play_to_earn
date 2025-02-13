@@ -1,0 +1,8 @@
+.vscode
+CakeBuild
+Releases
+PlayToEarn/bin
+PlayToEarn/obj
+PlayToEarn.sln
+build.ps1
+build.sh

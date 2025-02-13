@@ -1,0 +1,14 @@
+{
+    "type": "code",
+    "modid": "playtoearn",
+    "name": "PlayToEarn",
+    "authors": [
+        "Gxsper"
+    ],
+    "description": "Add PTE coins to players playing",
+    "version": "1.0.0",
+    "side": "server",
+    "dependencies": {
+        "game": ""
+    }
+}
