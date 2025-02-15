@@ -35,6 +35,12 @@ public static class Configuration
             // Load default configurations
             loadedConfig = api.Assets.Get(new AssetLocation(defaultDirectory)).ToObject<Dictionary<string, object>>();
 
+            // Creating default paths
+            loadedConfig["playersWalletsPath"] = Path.Combine(api.DataBasePath, "Wallets", "players_wallets.json");
+            loadedConfig["walletsPath"] = Path.Combine(api.DataBasePath, "Wallets", "wallets.json");
+            loadedConfig["lockFile"] = Path.Combine(api.DataBasePath, "Wallets", "wallets.lock");
+            loadedConfig["resyncFile"] = Path.Combine(api.DataBasePath, "Wallets", "wallets.resync");
+
             PlayToEarnModSystem.Debug.Log($"Configurations loaded, saving configs in: {configPath}");
             try
             {

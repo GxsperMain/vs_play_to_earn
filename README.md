@@ -1,5 +1,5 @@
 # Vintage Story Play To Earn
-Base template for creating a vintage story compatibility with PTE coin
+Base template for creating a vintage story compatibility with PTE coin, check commands in [wiki](https://github.com/GxsperMain/vs_play_to_earn/wiki)
 
 ### Dependencies
 - [AFKModule](https://mods.vintagestory.at/afkmodule)
