@@ -12,11 +12,23 @@ namespace PlayToEarn;
 
 public class PlayToEarnModSystem : ModSystem
 {
-    long lastTimestamp = 0;
-    ICoreServerAPI serverAPI;
+    private long lastTimestamp = 0;
+    private ICoreServerAPI serverAPI;
+    private readonly List<IServerPlayer> onlinePlayers = [];
 
-    Dictionary<string, string> playerWallets = [];
-    Dictionary<string, long> walletsValues = [];
+    /// <summary>
+    /// Stores all players wallets
+    /// </summary>
+    private Dictionary<string, string> playerWallets = [];
+    /// <summary>
+    /// Stores the actual quantity of coins per wallet
+    /// </summary>
+    private Dictionary<string, long> walletsValues = [];
+
+    /// <summary>
+    ///  Player UID / bool for earning coing
+    /// </summary>
+    public static readonly Dictionary<string, bool> playersWalletsStatus = [];
 
     public override void AssetsLoaded(ICoreAPI api)
     {
@@ -58,30 +70,42 @@ public class PlayToEarnModSystem : ModSystem
         api.Event.RegisterGameTickListener(OnTick, Configuration.millisecondsPerTick);
 
         api.ChatCommands.Create("wallet")
-            .WithDescription("Set up your wallet address")
+            .WithDescription("Set up your wallet address, /wallet 0x123... to start earning PTE")
             .RequiresPlayer()
             .RequiresPrivilege(Privilege.chat)
             .WithArgs(new StringArgParser("arguments", false))
             .HandleWith(SetWalletAddress);
 
         api.ChatCommands.Create("balance")
-            .WithDescription("View your PTE balance to earn")
+            .WithDescription("View your PTE balance to earn, ensure you have set your wallet using /wallet 0x123...")
             .RequiresPlayer()
             .RequiresPrivilege(Privilege.chat)
             .HandleWith(ViewBalance);
+
+        api.Event.PlayerNowPlaying += PlayerJoin;
+        api.Event.PlayerDisconnect += PlayerDisconnect;
     }
 
     #region commands
     private TextCommandResult ViewBalance(TextCommandCallingArgs args)
     {
-        if (walletsValues.TryGetValue(args.Caller.Player.PlayerUID, out long balance))
-            return TextCommandResult.Success($"PTE: {balance / (decimal)Math.Pow(10, 18)}", "3");
+        string statusText = "";
+        if (playersWalletsStatus.TryGetValue(args.Caller.Player.PlayerUID, out bool status))
+        {
+            if (status) statusText = ", Currently earning PTE";
+            else statusText = ", YOU ARE NOT EARNING PTE";
+        }
+
+        if (walletsValues.TryGetValue(playerWallets[args.Caller.Player.PlayerUID], out long balance))
+            return TextCommandResult.Success($"PTE: {Math.Round(balance / (decimal)Math.Pow(10, 18), 2)}{statusText}", "3");
         else
             return TextCommandResult.Error($"You don't have any balance or does not have any wallet set up", "4");
     }
 
     private TextCommandResult SetWalletAddress(TextCommandCallingArgs args)
     {
+        if (args[0] == null) return TextCommandResult.Error($"No wallet provided", "5");
+
         static bool ValidAddress(string address)
             => Regex.IsMatch(address, @"^0x[a-fA-F0-9]{40}$");
 
@@ -105,7 +129,7 @@ public class PlayToEarnModSystem : ModSystem
         Task.Run(() =>
         {
             // No players? no usseless disk read/write
-            if (serverAPI.World.AllOnlinePlayers.Length == 0)
+            if (onlinePlayers.Count == 0)
             {
                 lastTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 return;
@@ -139,7 +163,7 @@ public class PlayToEarnModSystem : ModSystem
             }
 
             // Adding additionalCoins to the wallets address
-            foreach (IPlayer player in serverAPI.World.AllOnlinePlayers)
+            foreach (IServerPlayer player in onlinePlayers)
             {
                 // Check if wallet was registered
                 if (playerWallets.TryGetValue(player.PlayerUID, out string walletAddress))
@@ -149,6 +173,8 @@ public class PlayToEarnModSystem : ModSystem
                     {
                         if (Configuration.enableExtendedLog)
                             Debug.Log("Ignoring " + player.PlayerName + " because he is afk");
+
+                        playersWalletsStatus[player.PlayerUID] = false;
                         continue;
                     }
 
@@ -157,6 +183,8 @@ public class PlayToEarnModSystem : ModSystem
                         walletsValues[walletAddress] += additionalCoins;
                     else
                         walletsValues[walletAddress] = additionalCoins;
+
+                    playersWalletsStatus[player.PlayerUID] = true;
 
                     if (Configuration.enableExtendedLog)
                         Debug.Log($"{player.PlayerName} have: {walletsValues[walletAddress] / (decimal)Math.Pow(10, 18)} PTE");
@@ -183,6 +211,18 @@ public class PlayToEarnModSystem : ModSystem
         });
     }
     #endregion
+
+    #region login events
+    private void PlayerJoin(IServerPlayer byPlayer)
+    {
+        onlinePlayers.Add(byPlayer);
+    }
+    private void PlayerDisconnect(IServerPlayer byPlayer)
+    {
+        onlinePlayers.Remove(byPlayer);
+    }
+    #endregion
+
     static public class Debug
     {
         static private ILogger loggerForNonTerminalUsers;
