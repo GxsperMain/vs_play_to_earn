@@ -6,7 +6,7 @@
         "Gxsper"
     ],
     "description": "Add PTE coins to players playing",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "side": "server",
     "dependencies": {
         "game": ""

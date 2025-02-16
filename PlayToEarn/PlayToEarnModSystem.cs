@@ -96,10 +96,13 @@ public class PlayToEarnModSystem : ModSystem
             else statusText = ", YOU ARE NOT EARNING PTE";
         }
 
+        if (!playerWallets.TryGetValue(args.Caller.Player.PlayerUID, out _))
+            return TextCommandResult.Error($"You don't have any wallet set up", "4");
+
         if (walletsValues.TryGetValue(playerWallets[args.Caller.Player.PlayerUID], out long balance))
             return TextCommandResult.Success($"PTE: {Math.Round(balance / (decimal)Math.Pow(10, 18), 2)}{statusText}", "3");
         else
-            return TextCommandResult.Error($"You don't have any balance or does not have any wallet set up", "4");
+            return TextCommandResult.Error($"You don't have any balance", "5");
     }
 
     private TextCommandResult SetWalletAddress(TextCommandCallingArgs args)
@@ -128,86 +131,103 @@ public class PlayToEarnModSystem : ModSystem
         // Running on secondary thread to not struggle the server
         Task.Run(() =>
         {
-            // No players? no usseless disk read/write
-            if (onlinePlayers.Count == 0)
+            try
             {
-                lastTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                return;
-            }
-
-            long actualTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            int secondsPassed = (int)(actualTimestamp - lastTimestamp);
-            long additionalCoins = Configuration.coinsPerSecond * secondsPassed;
-
-            if (File.Exists(Configuration.lockFile))
-            {
-                Debug.Log($"WARNING: Wallet is busy...");
-                return;
-            }
-
-            // Reading wallets json            
-            if (File.Exists(Configuration.walletsPath) && File.Exists(Configuration.resyncFile))
-            {
-                if (Configuration.enableExtendedLog)
-                    Debug.Log("Resync file is present, loading wallets values from disk to memory");
-
-                // Locking the file because we are reading now
-                using var lockFile = File.Create(Configuration.lockFile);
-                lockFile.Close();
-
-                string jsonContent = File.ReadAllText(Configuration.walletsPath);
-                walletsValues = JsonConvert.DeserializeObject<Dictionary<string, long>>(jsonContent);
-
-                File.Delete(Configuration.lockFile);
-                File.Delete(Configuration.resyncFile);
-            }
-
-            // Adding additionalCoins to the wallets address
-            foreach (IServerPlayer player in onlinePlayers)
-            {
-                // Check if wallet was registered
-                if (playerWallets.TryGetValue(player.PlayerUID, out string walletAddress))
+                // No players? no usseless disk read/write
+                if (onlinePlayers.Count == 0)
                 {
-                    // Afk players
-                    if (Events.playersSoftAfk.Contains(player.PlayerUID))
-                    {
-                        if (Configuration.enableExtendedLog)
-                            Debug.Log("Ignoring " + player.PlayerName + " because he is afk");
-
-                        playersWalletsStatus[player.PlayerUID] = false;
-                        continue;
-                    }
-
-                    // Giving coins
-                    if (walletsValues.TryGetValue(walletAddress, out _))
-                        walletsValues[walletAddress] += additionalCoins;
-                    else
-                        walletsValues[walletAddress] = additionalCoins;
-
-                    playersWalletsStatus[player.PlayerUID] = true;
-
                     if (Configuration.enableExtendedLog)
-                        Debug.Log($"{player.PlayerName} have: {walletsValues[walletAddress] / (decimal)Math.Pow(10, 18)} PTE");
+                        Debug.Log("No players online...");
+                    lastTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    return;
                 }
-            }
 
-            lastTimestamp = actualTimestamp;
 
-            // After calculations checks
-            if (!File.Exists(Configuration.lockFile))
-            {
-                if (!File.Exists(Configuration.resyncFile))
+
+                long actualTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                int secondsPassed = (int)(actualTimestamp - lastTimestamp);
+                long additionalCoins = Configuration.coinsPerSecond * secondsPassed;
+
+                // Directories creations
+                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.lockFile));
+                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.resyncFile));
+                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.walletsPath));
+                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.playersWalletsPath));
+
+                if (File.Exists(Configuration.lockFile))
                 {
+                    Debug.Log($"WARNING: Wallet is busy...");
+                    return;
+                }
+
+                // Reading wallets json            
+                if (File.Exists(Configuration.walletsPath) && File.Exists(Configuration.resyncFile))
+                {
+                    if (Configuration.enableExtendedLog)
+                        Debug.Log("Resync file is present, loading wallets values from disk to memory");
+
                     // Locking the file because we are reading now
                     using var lockFile = File.Create(Configuration.lockFile);
                     lockFile.Close();
 
-                    File.WriteAllText(Configuration.walletsPath, JsonConvert.SerializeObject(walletsValues, Formatting.Indented));
+                    string jsonContent = File.ReadAllText(Configuration.walletsPath);
+                    walletsValues = JsonConvert.DeserializeObject<Dictionary<string, long>>(jsonContent);
+
                     File.Delete(Configuration.lockFile);
+                    File.Delete(Configuration.resyncFile);
                 }
-                else Debug.Log($"ERROR: Cannot write the wallet values from memory to the {Configuration.walletsPath} a resync request was called");
+
+                // Adding additionalCoins to the wallets address
+                foreach (IServerPlayer player in onlinePlayers)
+                {
+                    // Check if wallet was registered
+                    if (playerWallets.TryGetValue(player.PlayerUID, out string walletAddress))
+                    {
+                        // Afk players
+                        if (Events.playersSoftAfk.Contains(player.PlayerUID))
+                        {
+                            if (Configuration.enableExtendedLog)
+                                Debug.Log("Ignoring " + player.PlayerName + " because he is afk");
+
+                            playersWalletsStatus[player.PlayerUID] = false;
+                            continue;
+                        }
+
+                        // Giving coins
+                        if (walletsValues.TryGetValue(walletAddress, out _))
+                            walletsValues[walletAddress] += additionalCoins;
+                        else
+                            walletsValues[walletAddress] = additionalCoins;
+
+                        playersWalletsStatus[player.PlayerUID] = true;
+
+                        if (Configuration.enableExtendedLog)
+                            Debug.Log($"{player.PlayerName} have: {walletsValues[walletAddress] / (decimal)Math.Pow(10, 18)} PTE");
+                    }
+                }
+
+                lastTimestamp = actualTimestamp;
+
+                // After calculations checks
+                if (!File.Exists(Configuration.lockFile))
+                {
+                    if (!File.Exists(Configuration.resyncFile))
+                    {
+                        // Locking the file because we are reading now
+                        using var lockFile = File.Create(Configuration.lockFile);
+                        lockFile.Close();
+
+                        File.WriteAllText(Configuration.walletsPath, JsonConvert.SerializeObject(walletsValues, Formatting.Indented));
+                        File.Delete(Configuration.lockFile);
+                    }
+                    else Debug.Log($"ERROR: Cannot write the wallet values from memory to the {Configuration.walletsPath} a resync request was called");
+                }
+                else Debug.Log($"ERROR: Cannot write the wallet values from memory to the {Configuration.walletsPath} the file is busy");
             }
-            else Debug.Log($"ERROR: Cannot write the wallet values from memory to the {Configuration.walletsPath} the file is busy");
+            catch (Exception ex)
+            {
+                Debug.Log($"ERROR: {ex.Message}");
+            }
         });
     }
     #endregion
