@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AFKModule.Modules;
@@ -10,7 +11,7 @@ using Vintagestory.API.Server;
 
 namespace PlayToEarn;
 
-public class PlayToEarnModSystem : ModSystem
+public class Initialization : ModSystem
 {
     private long lastTimestamp = 0;
     private ICoreServerAPI serverAPI;
@@ -23,7 +24,7 @@ public class PlayToEarnModSystem : ModSystem
     /// <summary>
     /// Stores the actual quantity of coins per wallet
     /// </summary>
-    private Dictionary<string, long> walletsValues = [];
+    private Dictionary<string, BigInteger> walletsValues = [];
 
     /// <summary>
     ///  Player UID / bool for earning coing
@@ -54,7 +55,7 @@ public class PlayToEarnModSystem : ModSystem
             lockFile.Close();
 
             string jsonContent = File.ReadAllText(Configuration.walletsPath);
-            walletsValues = JsonConvert.DeserializeObject<Dictionary<string, long>>(jsonContent);
+            walletsValues = JsonConvert.DeserializeObject<Dictionary<string, BigInteger>>(jsonContent);
 
             File.Delete(Configuration.lockFile);
         }
@@ -99,8 +100,8 @@ public class PlayToEarnModSystem : ModSystem
         if (!playerWallets.TryGetValue(args.Caller.Player.PlayerUID, out _))
             return TextCommandResult.Error($"You don't have any wallet set up", "4");
 
-        if (walletsValues.TryGetValue(playerWallets[args.Caller.Player.PlayerUID], out long balance))
-            return TextCommandResult.Success($"PTE: {Math.Round(balance / (decimal)Math.Pow(10, 18), 2)}{statusText}", "3");
+        if (walletsValues.TryGetValue(playerWallets[args.Caller.Player.PlayerUID], out BigInteger balance))
+            return TextCommandResult.Success($"PTE: {Configuration.FormatCoinToHumanReadable(balance)}{statusText}", "3");
         else
             return TextCommandResult.Error($"You don't have any balance", "5");
     }
@@ -146,7 +147,7 @@ public class PlayToEarnModSystem : ModSystem
 
                 long actualTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 int secondsPassed = (int)(actualTimestamp - lastTimestamp);
-                long additionalCoins = Configuration.coinsPerSecond * secondsPassed;
+                BigInteger additionalCoins = Configuration.coinsPerSecond * secondsPassed;
 
                 // Directories creations
                 Directory.CreateDirectory(Path.GetDirectoryName(Configuration.lockFile));
@@ -171,9 +172,17 @@ public class PlayToEarnModSystem : ModSystem
                     lockFile.Close();
 
                     string jsonContent = File.ReadAllText(Configuration.walletsPath);
-                    walletsValues = JsonConvert.DeserializeObject<Dictionary<string, long>>(jsonContent);
+                    walletsValues = JsonConvert.DeserializeObject<Dictionary<string, BigInteger>>(jsonContent);
 
                     File.Delete(Configuration.lockFile);
+                    File.Delete(Configuration.resyncFile);
+                }
+                else if (!File.Exists(Configuration.walletsPath) && File.Exists(Configuration.resyncFile))
+                {
+                    if (Configuration.enableExtendedLog)
+                        Debug.Log("Resync file is present, but wallets is null, resetting all players wallets values!!!...");
+                    walletsValues = [];
+
                     File.Delete(Configuration.resyncFile);
                 }
 
@@ -202,7 +211,7 @@ public class PlayToEarnModSystem : ModSystem
                         playersWalletsStatus[player.PlayerUID] = true;
 
                         if (Configuration.enableExtendedLog)
-                            Debug.Log($"{player.PlayerName} have: {walletsValues[walletAddress] / (decimal)Math.Pow(10, 18)} PTE");
+                            Debug.Log($"{player.PlayerName} have: {Configuration.FormatCoinToHumanReadable(walletsValues[walletAddress])} PTE");
                     }
                 }
 
