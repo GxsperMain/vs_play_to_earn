@@ -175,7 +175,7 @@ public static class Configuration
 
         if (quantityString.Length == 1) return $"0.0{quantityString}";
         if (quantityString.Length == 2) return $"0.{quantityString}";
-        else return quantityString[..^3] + "," + quantityString[^2..];
+        else return quantityString[..^2] + "," + quantityString[^2..];
     }
     #endregion
 }
