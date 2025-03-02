@@ -3,9 +3,23 @@ Base template for creating a vintage story compatibility with PTE coin, check co
 
 ### Dependencies
 - [AFKModule](https://mods.vintagestory.at/afkmodule)
+- [Mysql Database](https://www.mysql.com/)
 
-### To Do
-- Uses database format instead of jsons
+# Using
+- Install a database like mysql or mariadb
+- Create a user for the database: GRANT ALL PRIVILEGES ON pte_wallets.* TO 'pte_admin'@'localhost' IDENTIFIED BY 'supersecretpassword' WITH GRANT OPTION; FLUSH PRIVILEGES;
+- Create a table named vintagestory:
+```sql
+CREATE TABLE vintagestory (
+    uniqueid VARCHAR(255) NOT NULL PRIMARY KEY,
+    walletaddress VARCHAR(255) NOT NULL,
+    value DECIMAL(50, 0) NOT NULL DEFAULT 0
+);
+```
+- Put this mod on your server, [reference](https://wiki.vintagestory.at/Adding_mods)
+- Starts the server at least one time
+- Go to DataPath from your vintage story server, find ModConfig and change the PlayToEarn configurations for you desired database
+- Restart the server and everthing should be running
 
 # About VS Play To Earn
 VS Play To Earn is open source project and can easily be accessed on the github, all contents from this mod is completly free.

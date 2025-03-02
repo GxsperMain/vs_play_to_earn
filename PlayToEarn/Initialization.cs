@@ -1,35 +1,26 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Numerics;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AFKModule.Modules;
-using Newtonsoft.Json;
+using MySqlConnector;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
 
 namespace PlayToEarn;
 
-public class Initialization : ModSystem
+public partial class Initialization : ModSystem
 {
     private long lastTimestamp = 0;
-    private ICoreServerAPI serverAPI;
     private readonly List<IServerPlayer> onlinePlayers = [];
-
-    /// <summary>
-    /// Stores all players wallets
-    /// </summary>
-    private Dictionary<string, string> playerWallets = [];
-    /// <summary>
-    /// Stores the actual quantity of coins per wallet
-    /// </summary>
-    private Dictionary<string, BigInteger> walletsValues = [];
 
     /// <summary>
     ///  Player UID / bool for earning coing
     /// </summary>
     public static readonly Dictionary<string, bool> playersWalletsStatus = [];
+
+    private static MySqlConnection walletsDatabase;
 
     public override void AssetsLoaded(ICoreAPI api)
     {
@@ -42,32 +33,22 @@ public class Initialization : ModSystem
     {
         base.StartServerSide(api);
 
-        if (File.Exists(Configuration.lockFile))
+        walletsDatabase = new MySqlConnection(
+            $"Server={Configuration.databaseAddress};Database={Configuration.databaseName};User={Configuration.databaseUsername};Password={Configuration.databasePassword};"
+        );
+        try
         {
-            Debug.Log("ERROR: lock file is present cannot load the wallets file");
-            api.Server.ShutDown();
+            walletsDatabase.Open();
         }
-
-        if (File.Exists(Configuration.walletsPath))
+        catch (Exception ex)
         {
-            // Locking the file because we are reading now
-            using var lockFile = File.Create(Configuration.lockFile);
-            lockFile.Close();
-
-            string jsonContent = File.ReadAllText(Configuration.walletsPath);
-            walletsValues = JsonConvert.DeserializeObject<Dictionary<string, BigInteger>>(jsonContent);
-
-            File.Delete(Configuration.lockFile);
+            Debug.Log($"ERROR: Cannot connect to the wallets database: {ex.Message}");
+            Debug.Log("Shutting down the plugin...");
+            Dispose();
+            return;
         }
-        else Debug.Log($"ERROR: cannot read {Configuration.walletsPath} because its not exist, will be created any empty one");
+        Debug.Log("Successful connected to database");
 
-        if (File.Exists(Configuration.playersWalletsPath))
-        {
-            string jsonContent = File.ReadAllText(Configuration.playersWalletsPath);
-            playerWallets = JsonConvert.DeserializeObject<Dictionary<string, string>>(jsonContent);
-        }
-
-        serverAPI = api;
         api.Event.RegisterGameTickListener(OnTick, Configuration.millisecondsPerTick);
 
         api.ChatCommands.Create("wallet")
@@ -90,20 +71,21 @@ public class Initialization : ModSystem
     #region commands
     private TextCommandResult ViewBalance(TextCommandCallingArgs args)
     {
-        string statusText = "";
-        if (playersWalletsStatus.TryGetValue(args.Caller.Player.PlayerUID, out bool status))
-        {
-            if (status) statusText = ", Currently earning PTE";
-            else statusText = ", YOU ARE NOT EARNING PTE";
-        }
+        IPlayer player = args.Caller.Player;
+        string statusText;
+        if (Events.playersSoftAfk.Contains(player.PlayerUID)) statusText = ", YOU ARE NOT EARNING PTE";
+        else statusText = ", Currently earning PTE";
 
-        if (!playerWallets.TryGetValue(args.Caller.Player.PlayerUID, out _))
-            return TextCommandResult.Error($"You don't have any wallet set up", "4");
-
-        if (walletsValues.TryGetValue(playerWallets[args.Caller.Player.PlayerUID], out BigInteger balance))
-            return TextCommandResult.Success($"PTE: {Configuration.FormatCoinToHumanReadable(balance)}{statusText}", "3");
-        else
-            return TextCommandResult.Error($"You don't have any balance", "5");
+        using MySqlCommand databaseCommand = new($"SELECT value FROM vintagestory WHERE uniqueid = '{player.PlayerUID}'", walletsDatabase);
+        using MySqlDataReader reader = databaseCommand.ExecuteReader();
+        if (reader.HasRows)
+            while (reader.Read())
+            {
+                decimal value = reader.GetDecimal("value");
+                return TextCommandResult.Success($"PTE: {Configuration.FormatCoinToHumanReadable(value.ToString())}{statusText}", "3");
+            }
+        else return TextCommandResult.Error($"You don't have any wallet set up", "4");
+        return TextCommandResult.Error($"You don't have any balance", "5");
     }
 
     private TextCommandResult SetWalletAddress(TextCommandCallingArgs args)
@@ -111,7 +93,7 @@ public class Initialization : ModSystem
         if (args[0] == null) return TextCommandResult.Error($"No wallet provided", "5");
 
         static bool ValidAddress(string address)
-            => Regex.IsMatch(address, @"^0x[a-fA-F0-9]{40}$");
+            => AddressValidatorRegex().IsMatch(address);
 
         IPlayer player = args.Caller.Player;
         string address = args[0].ToString();
@@ -119,10 +101,20 @@ public class Initialization : ModSystem
         if (!ValidAddress(address))
             return TextCommandResult.Error($"Invalid wallet", "1");
 
-        playerWallets[player.PlayerUID] = address;
-        File.WriteAllTextAsync(Configuration.playersWalletsPath, JsonConvert.SerializeObject(playerWallets, Formatting.Indented));
+        // Update if exist
+        {
+            using MySqlCommand databaseCommand = new($"UPDATE vintagestory SET walletaddress = '{address}' WHERE uniqueid = '{player.PlayerUID}'", walletsDatabase);
+            int rowsAffected = databaseCommand.ExecuteNonQuery();
+            if (rowsAffected > 0) return TextCommandResult.Success($"Wallet Set!", "2");
+        }
 
-        return TextCommandResult.Success($"Wallet Set!", "2");
+        // Create if not exist
+        {
+            using MySqlCommand databaseCommand = new($"INSERT INTO vintagestory (walletaddress, uniqueid) VALUES ('{address}', '{player.PlayerUID}')", walletsDatabase);
+            int rowsAffected = databaseCommand.ExecuteNonQuery();
+            if (rowsAffected > 0) return TextCommandResult.Success($"Wallet Set!", "2");
+            else return TextCommandResult.Error($"Cannot set your wallet, contact the administrator", "4");
+        }
     }
     #endregion
 
@@ -134,7 +126,7 @@ public class Initialization : ModSystem
         {
             try
             {
-                // No players? no usseless disk read/write
+                // No players? nothing to do
                 if (onlinePlayers.Count == 0)
                 {
                     if (Configuration.enableExtendedLog)
@@ -143,95 +135,28 @@ public class Initialization : ModSystem
                     return;
                 }
 
-
-
                 long actualTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 int secondsPassed = (int)(actualTimestamp - lastTimestamp);
                 BigInteger additionalCoins = Configuration.coinsPerSecond * secondsPassed;
-
-                // Directories creations
-                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.lockFile));
-                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.resyncFile));
-                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.walletsPath));
-                Directory.CreateDirectory(Path.GetDirectoryName(Configuration.playersWalletsPath));
-
-                if (File.Exists(Configuration.lockFile))
-                {
-                    Debug.Log($"WARNING: Wallet is busy...");
-                    return;
-                }
-
-                // Reading wallets json            
-                if (File.Exists(Configuration.walletsPath) && File.Exists(Configuration.resyncFile))
-                {
-                    if (Configuration.enableExtendedLog)
-                        Debug.Log("Resync file is present, loading wallets values from disk to memory");
-
-                    // Locking the file because we are reading now
-                    using var lockFile = File.Create(Configuration.lockFile);
-                    lockFile.Close();
-
-                    string jsonContent = File.ReadAllText(Configuration.walletsPath);
-                    walletsValues = JsonConvert.DeserializeObject<Dictionary<string, BigInteger>>(jsonContent);
-
-                    File.Delete(Configuration.lockFile);
-                    File.Delete(Configuration.resyncFile);
-                }
-                else if (!File.Exists(Configuration.walletsPath) && File.Exists(Configuration.resyncFile))
-                {
-                    if (Configuration.enableExtendedLog)
-                        Debug.Log("Resync file is present, but wallets is null, resetting all players wallets values!!!...");
-                    walletsValues = [];
-
-                    File.Delete(Configuration.resyncFile);
-                }
+                lastTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
                 // Adding additionalCoins to the wallets address
                 foreach (IServerPlayer player in onlinePlayers)
                 {
-                    // Check if wallet was registered
-                    if (playerWallets.TryGetValue(player.PlayerUID, out string walletAddress))
+                    // Afk players
+                    if (Events.playersSoftAfk.Contains(player.PlayerUID))
                     {
-                        // Afk players
-                        if (Events.playersSoftAfk.Contains(player.PlayerUID))
-                        {
-                            if (Configuration.enableExtendedLog)
-                                Debug.Log("Ignoring " + player.PlayerName + " because he is afk");
-
-                            playersWalletsStatus[player.PlayerUID] = false;
-                            continue;
-                        }
-
-                        // Giving coins
-                        if (walletsValues.TryGetValue(walletAddress, out _))
-                            walletsValues[walletAddress] += additionalCoins;
-                        else
-                            walletsValues[walletAddress] = additionalCoins;
-
-                        playersWalletsStatus[player.PlayerUID] = true;
-
                         if (Configuration.enableExtendedLog)
-                            Debug.Log($"{player.PlayerName} have: {Configuration.FormatCoinToHumanReadable(walletsValues[walletAddress])} PTE");
+                            Debug.Log("Ignoring " + player.PlayerName + " because he is afk");
+                        continue;
                     }
+
+                    using MySqlCommand databaseCommand = new($"UPDATE vintagestory SET value = value + {additionalCoins} WHERE uniqueid = '{player.PlayerUID}'", walletsDatabase);
+                    int rowsAffected = databaseCommand.ExecuteNonQuery();
+                    if (Configuration.enableExtendedLog)
+                        if (rowsAffected > 0) Debug.Log($"{player.PlayerName} received: {Configuration.FormatCoinToHumanReadable(additionalCoins)} PTE");
+                        else Debug.Log($"{player.PlayerName} does not have a wallet setup");
                 }
-
-                lastTimestamp = actualTimestamp;
-
-                // After calculations checks
-                if (!File.Exists(Configuration.lockFile))
-                {
-                    if (!File.Exists(Configuration.resyncFile))
-                    {
-                        // Locking the file because we are reading now
-                        using var lockFile = File.Create(Configuration.lockFile);
-                        lockFile.Close();
-
-                        File.WriteAllText(Configuration.walletsPath, JsonConvert.SerializeObject(walletsValues, Formatting.Indented));
-                        File.Delete(Configuration.lockFile);
-                    }
-                    else Debug.Log($"ERROR: Cannot write the wallet values from memory to the {Configuration.walletsPath} a resync request was called");
-                }
-                else Debug.Log($"ERROR: Cannot write the wallet values from memory to the {Configuration.walletsPath} the file is busy");
             }
             catch (Exception ex)
             {
@@ -260,4 +185,6 @@ public class Initialization : ModSystem
             => loggerForNonTerminalUsers?.Log(EnumLogType.Debug, $"[PlayToEarn] {message}");
     }
 
+    [GeneratedRegex("^0x[a-fA-F0-9]{40}$")]
+    private static partial Regex AddressValidatorRegex();
 }

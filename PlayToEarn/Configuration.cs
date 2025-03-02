@@ -37,12 +37,6 @@ public static class Configuration
             // Load default configurations
             loadedConfig = api.Assets.Get(new AssetLocation(defaultDirectory)).ToObject<Dictionary<string, object>>();
 
-            // Creating default paths
-            loadedConfig["playersWalletsPath"] = Path.Combine(api.DataBasePath, "Wallets", "players_wallets.json");
-            loadedConfig["walletsPath"] = Path.Combine(api.DataBasePath, "Wallets", "wallets.json");
-            loadedConfig["lockFile"] = Path.Combine(api.DataBasePath, "Wallets", "wallets.lock");
-            loadedConfig["resyncFile"] = Path.Combine(api.DataBasePath, "Wallets", "wallets.resync");
-
             Initialization.Debug.Log($"Configurations loaded, saving configs in: {configPath}");
             try
             {
@@ -93,10 +87,11 @@ public static class Configuration
     public static BigInteger coinsPerSecond = 277777800000000;
     #endregion
 
-    public static string playersWalletsPath = "";
-    public static string walletsPath = "";
-    public static string lockFile = "";
-    public static string resyncFile = "";
+    public static string databaseName = "pte_wallets";
+    public static string databaseTable = "vintagestory";
+    public static string databaseUsername = "pte_admin";
+    public static string databasePassword = "supersecretpassword";
+    public static string databaseAddress = "localhost";
     public static bool enableExtendedLog = false;
 
     public static void UpdateBaseConfigurations(ICoreAPI api)
@@ -130,33 +125,40 @@ public static class Configuration
                 else coinsPerSecond = new BigInteger((long)value);
             else Initialization.Debug.Log("CONFIGURATION ERROR: coinsPerSecond not set");
         }
-        { //playersWalletsPath
-            if (baseConfigs.TryGetValue("playersWalletsPath", out object value))
-                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: playersWalletsPath is null");
-                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: playersWalletsPath is not int is {value.GetType()}");
-                else playersWalletsPath = (string)value;
-            else Initialization.Debug.Log("CONFIGURATION ERROR: playersWalletsPath not set");
+        { //databaseName
+            if (baseConfigs.TryGetValue("databaseName", out object value))
+                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: databaseName is null");
+                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: databaseName is not int is {value.GetType()}");
+                else databaseName = (string)value;
+            else Initialization.Debug.Log("CONFIGURATION ERROR: databaseName not set");
         }
-        { //walletsPath
-            if (baseConfigs.TryGetValue("walletsPath", out object value))
-                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: walletsPath is null");
-                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: walletsPath is not int is {value.GetType()}");
-                else walletsPath = (string)value;
-            else Initialization.Debug.Log("CONFIGURATION ERROR: walletsPath not set");
+        { //databaseTable
+            if (baseConfigs.TryGetValue("databaseTable", out object value))
+                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: databaseTable is null");
+                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: databaseTable is not int is {value.GetType()}");
+                else databaseTable = (string)value;
+            else Initialization.Debug.Log("CONFIGURATION ERROR: databaseTable not set");
         }
-        { //lockFile
-            if (baseConfigs.TryGetValue("lockFile", out object value))
-                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: lockFile is null");
-                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: lockFile is not int is {value.GetType()}");
-                else lockFile = (string)value;
-            else Initialization.Debug.Log("CONFIGURATION ERROR: lockFile not set");
+        { //databaseUsername
+            if (baseConfigs.TryGetValue("databaseUsername", out object value))
+                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: databaseUsername is null");
+                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: databaseUsername is not int is {value.GetType()}");
+                else databaseUsername = (string)value;
+            else Initialization.Debug.Log("CONFIGURATION ERROR: databaseUsername not set");
         }
-        { //resyncFile
-            if (baseConfigs.TryGetValue("resyncFile", out object value))
-                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: resyncFile is null");
-                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: resyncFile is not int is {value.GetType()}");
-                else resyncFile = (string)value;
-            else Initialization.Debug.Log("CONFIGURATION ERROR: resyncFile not set");
+        { //databasePassword
+            if (baseConfigs.TryGetValue("databasePassword", out object value))
+                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: databasePassword is null");
+                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: databasePassword is not int is {value.GetType()}");
+                else databasePassword = (string)value;
+            else Initialization.Debug.Log("CONFIGURATION ERROR: databasePassword not set");
+        }
+        { //databaseAddress
+            if (baseConfigs.TryGetValue("databaseAddress", out object value))
+                if (value is null) Initialization.Debug.Log("CONFIGURATION ERROR: databaseAddress is null");
+                else if (value is not string) Initialization.Debug.Log($"CONFIGURATION ERROR: databaseAddress is not int is {value.GetType()}");
+                else databaseAddress = (string)value;
+            else Initialization.Debug.Log("CONFIGURATION ERROR: databaseAddress not set");
         }
         { //enableExtendedLog
             if (baseConfigs.TryGetValue("enableExtendedLog", out object value))
@@ -167,7 +169,7 @@ public static class Configuration
         }
     }
 
-    public static string FormatCoinToHumanReadable(BigInteger quantity)
+    public static string FormatCoinToHumanReadable(object quantity)
     {
         string quantityString = quantity.ToString();
         if (quantityString.Length <= 15) return "0.00";
@@ -175,7 +177,7 @@ public static class Configuration
 
         if (quantityString.Length == 1) return $"0.0{quantityString}";
         if (quantityString.Length == 2) return $"0.{quantityString}";
-        else return quantityString[..^2] + "," + quantityString[^2..];
+        else return quantityString[..^2] + "." + quantityString[^2..];
     }
     #endregion
 }
